@@ -1,40 +1,46 @@
 import { AfterViewInit, Component, ElementRef, inject, OnInit, ViewChildren } from '@angular/core';
-import { Category } from '../category';
+import { Category } from '../models/category';
 import { CategoryService } from '../../category/services/categories.service';
-import { FormBuilder, FormControlName, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormControlName, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { DisplayMessage, GenericValidator, ValidationMessages } from '../../Utils/generic-form-validation';
 import { fromEvent, merge, Observable } from 'rxjs';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { CommonModule } from '@angular/common';
+import { FormBaseComponent } from '../../base-components/form-base.component';
 
 @Component({
   selector: 'app-edit-category',
-  standalone: false,
+  standalone: true,
   templateUrl: './edit-category.component.html',
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    RouterModule
+  ]
 })
 
-export class EditCategoryComponent implements OnInit, AfterViewInit{
+export class EditCategoryComponent extends FormBaseComponent implements OnInit, AfterViewInit {
 
   @ViewChildren(FormControlName, { read: ElementRef }) formInputElements!: ElementRef[];
   public category: Category;
   editionForm!: FormGroup;
   id!: string;
-  validationMessages: ValidationMessages;
-  genericValidator: GenericValidator;
-  displayMessage: DisplayMessage = {};
+  errorMessage: string = '';
   private route = inject(ActivatedRoute);
 
   constructor(private categoryService: CategoryService, private fb: FormBuilder, private router: Router) {
-      this.category = new Category();
-      this.validationMessages = {
-        name: {
-          required: 'The name is required',
-        },
-        description: {
-          required: 'The description is required',
-        },
-      };
-  
-      this.genericValidator = new GenericValidator(this.validationMessages);
+    super();
+    this.category = new Category();
+    this.validationMessages = {
+      name: {
+        required: 'The name is required',
+      },
+      description: {
+        required: 'The description is required',
+      },
+    };
+
+    super.configureValidationMessagesBase(this.validationMessages);
   }
 
   ngOnInit(): void {
@@ -44,49 +50,44 @@ export class EditCategoryComponent implements OnInit, AfterViewInit{
     });
 
     let paramId = this.route.snapshot.paramMap.get('id');
-    if(paramId != null && paramId != undefined)
-    {
-        this.category.id = this.id = paramId.toString();
-        this.loadCategory();
+    if (paramId != null && paramId != undefined) {
+      this.category.id = this.id = paramId.toString();
+      this.loadCategory();
     }
   }
 
-  loadCategory(): void{
+  loadCategory(): void {
     this.categoryService.getCategoryById(this.id)
-    .subscribe({
-      next: response => {
-        this.editionForm = this.fb.group({
-          name: [response.name, Validators.required],
-          description: [response.description, Validators.required]
-        });
-      },
-      error: e => {
-        console.log(e);
-      }
-    });
+      .subscribe({
+        next: response => {
+          this.editionForm = this.fb.group({
+            name: [response.name, Validators.required],
+            description: [response.description, Validators.required]
+          });
+        },
+        error: e => {
+          if (e.status === 401)
+            this.router.navigate(['/account/login']);
+          else {
+            console.error('Erro ao carregar categoria:', e);
+            this.errorMessage = 'Erro ao carregar categoria.';
+          }
+        }
+      });
   }
 
   ngAfterViewInit(): void {
-    let controlBlurs: Observable<any>[] = this.formInputElements
-    .map((formControl: ElementRef) => fromEvent(formControl.nativeElement, 'blur'));
-
-    merge(...controlBlurs).subscribe(() => {
-      this.displayMessage = this.genericValidator.processMessages(this.editionForm);
-    });
+    super.configureFormValidationBase(this.formInputElements, this.editionForm);
   }
 
-  editCategory(){
+  editCategory() {
     if (this.editionForm.dirty && this.editionForm.valid) {
       this.category = Object.assign({}, this.category, this.editionForm.value);
       this.updateCategory();
-      //to do a toaster of success
-    }
-    else{
-      //to do a toaster of error
     }
   }
 
-  updateCategory(){
+  updateCategory() {
     this.categoryService.updateCategory(this.category)
       .subscribe({
         next: response => {
@@ -94,8 +95,11 @@ export class EditCategoryComponent implements OnInit, AfterViewInit{
           this.router.navigateByUrl('/category');
         },
         error: e => {
-          console.log(e);
+          console.log(e.error.errors[0]);
+          this.errorMessage = e.error.errors[0];
         }
       })
+
+    this.unsavedChanges = false;
   }
 }

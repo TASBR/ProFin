@@ -1,5 +1,4 @@
-﻿using AutoMapper;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -8,32 +7,17 @@ using ProFin.Core.Interfaces.Services;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using static ProFin.API.ViewModels.UserViewModel;
+using static ProFin.API.ViewModel.UserViewModel;
 
 namespace ProFin.API.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    public class AuthController : MainController
+    public class AuthController(SignInManager<IdentityUser<Guid>> _signInManager,
+                                UserManager<IdentityUser<Guid>> _userManager,
+                                JwtSettings _jwtSettings,
+                                IUserService _userService,
+                                INotifier notifier) : MainController(notifier)
     {
-        private readonly SignInManager<IdentityUser> _signInManager;
-        private readonly UserManager<IdentityUser> _userManager;
-        private readonly JwtSettings _jwtSettings;
-        private readonly IUserService _userService;
-        private readonly IMapper _mapper;
-
-
-        public AuthController(SignInManager<IdentityUser> signInManager, UserManager<IdentityUser> userManager, JwtSettings jwtSettings, IUserService userService,
-        IMapper mapper, INotifier notifier)
-             : base(notifier)
-        {
-            _signInManager = signInManager;
-            _userManager = userManager;
-            _jwtSettings = jwtSettings;
-            _userService = userService;
-            _mapper = mapper;
-        }
-
         [HttpPost]
         [AllowAnonymous]
         [ProducesResponseType(StatusCodes.Status200OK)]
@@ -44,19 +28,21 @@ namespace ProFin.API.Controllers
         {
             if (!ModelState.IsValid) return ValidationProblem(ModelState);
 
-            var user = new IdentityUser
+            //Valida primeiro que todos os dados obrigatorios foram informados, antes de gerar um usuario invalido no identity
+            _userService.ValidateUser(Core.Models.User.Create(Guid.Empty, model.Email, model.FirstName, model.LastName, model.Birthdate));
+            if (IsValid() == false) return CustomResponse(model);
+
+            var user = new IdentityUser<Guid>
             {
                 UserName = model.Email,
                 Email = model.Email,
                 EmailConfirmed = true
             };
 
-            await _userService.Create(Core.Models.User.Create(Guid.Parse(user.Id), user.Email, model.FirstName, model.LastName, model.Birthdate));
-            if (IsValid() == false) return CustomResponse(model);
-
             var result = await _userManager.CreateAsync(user, model.Password);
             if (result.Succeeded == true)
             {
+                await _userService.Create(Core.Models.User.Create(user.Id, user.Email, model.FirstName, model.LastName, model.Birthdate));
                 await _signInManager.SignInAsync(user, false);
                 return CustomResponse(await GetJwt(user.Email));
             }
@@ -86,11 +72,11 @@ namespace ProFin.API.Controllers
 
             if (result.IsLockedOut)
             {
-                NotifieError("This user is temporarily blocked");
+                NotifieError("Este usuário está temporariamente bloqueado");
                 return CustomResponse(loginUser);
             }
 
-            NotifieError("Incorrect user or password");
+            NotifieError("Usuário ou senha incorretos");
             return CustomResponse(loginUser);
         }
 
@@ -100,10 +86,10 @@ namespace ProFin.API.Controllers
 
             var userClaims = await _userManager.GetClaimsAsync(user);
 
-            userClaims.Add(new Claim(ClaimTypes.NameIdentifier, user.Id));
-            userClaims.Add(new Claim(JwtRegisteredClaimNames.Sub, user.Id));
+            userClaims.Add(new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()));
+            userClaims.Add(new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()));
             userClaims.Add(new Claim(JwtRegisteredClaimNames.Email, user.Email));
-            userClaims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
+            userClaims.Add(new Claim(JwtRegisteredClaimNames.Jti, user.Id.ToString()));
             userClaims.Add(new Claim(JwtRegisteredClaimNames.Nbf, ToUnixEpochDate(DateTime.UtcNow).ToString()));
             userClaims.Add(new Claim(JwtRegisteredClaimNames.Iat, ToUnixEpochDate(DateTime.UtcNow).ToString(), ClaimValueTypes.Integer64));
 
@@ -135,7 +121,7 @@ namespace ProFin.API.Controllers
                 ExpiresIn = TimeSpan.FromHours(_jwtSettings.ExpirationHours).TotalSeconds,
                 UserToken = new UserTokenViewModel
                 {
-                    Id = user.Id,
+                    Id = user.Id.ToString(),
                     Email = user.Email,
                     Claims = userClaims.Select(c => new ClaimViewModel { Type = c.Type, Value = c.Value })
                 }

@@ -1,8 +1,6 @@
 ﻿using AutoMapper;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ProFin.API.ViewModel;
-using ProFin.API.ViewModels;
 using ProFin.Core.Interfaces.Repositories;
 using ProFin.Core.Interfaces.Services;
 using ProFin.Core.Models;
@@ -14,13 +12,14 @@ namespace ProFin.API.Controllers
         ICategoryTransactionRepository categoryTransactionRepository,
         IMapper mapper,
         INotifier notifier,
-        ITransactionService transactionService
+        IFinancialTransactionService financialTransactionService
         ) : MainController(notifier)
     {
         [HttpGet]
-        public async Task<IEnumerable<TransactionViewModel>> GetAll()
+        public async Task<ActionResult<IEnumerable<TransactionViewModel>>> GetAll([FromQuery]Dictionary<string, string> filters = null)
         {
-            return mapper.Map<IEnumerable<TransactionViewModel>>(await transactionRepository.GetAll());
+            var result = mapper.Map<IEnumerable<TransactionViewModel>>(await financialTransactionService.GetAll(filters));
+            return CustomResponse(result.ToList());
         }
 
         [HttpGet("{id:guid}")]
@@ -38,12 +37,13 @@ namespace ProFin.API.Controllers
         {
             if (!ModelState.IsValid) return CustomResponse(ModelState);
 
-            await transactionService.Insert(mapper.Map<FinancialTransaction>(transactionViewModel));
+            var transaction = mapper.Map<FinancialTransaction>(transactionViewModel);
+
+            await financialTransactionService.Insert(transaction);
 
             return CustomResponse(transactionViewModel);
         }
 
-        
         [HttpPut("{id:guid}")]
         public async Task<ActionResult<TransactionViewModel>> Update(Guid id, TransactionViewModel transactionViewModel)
         {
@@ -55,19 +55,19 @@ namespace ProFin.API.Controllers
 
             if (!ModelState.IsValid) return CustomResponse(ModelState);
 
-            await transactionService.Update(mapper.Map<FinancialTransaction>(transactionViewModel));
+            await financialTransactionService.Update(mapper.Map<FinancialTransaction>(transactionViewModel));
 
             return CustomResponse(transactionViewModel);
         }
 
         [HttpDelete("{id:guid}")]
-        public async Task<ActionResult<TransactionViewModel>> Excluir(Guid id)
+        public async Task<ActionResult<TransactionViewModel>> Delete(Guid id)
         {
             var transactionViewModel = await GetTransactionCategory(id);
 
             if (transactionViewModel == null) return NotFound();
 
-            await transactionService.Delete(id);
+            await financialTransactionService.Delete(id);
 
             return CustomResponse(transactionViewModel);
         }
@@ -82,6 +82,19 @@ namespace ProFin.API.Controllers
         private async Task<TransactionViewModel> GetTransactionCategory(Guid id)
         {
             return mapper.Map<TransactionViewModel>(await transactionRepository.GetFinancialTransactionCategoryAsync(id));
+        }
+
+        [HttpGet("since/{startedDate}")]
+        public async Task<IActionResult> GetSince(string startedDate)
+        {
+            if (!DateTime.TryParse(startedDate, out var parsedDate))
+            {
+                NotifieError("Data no formato inválido. Formato esperado: yyyy-MM-ddTHH:mm:ss");
+                return CustomResponse();
+            }
+
+            var result = mapper.Map<IEnumerable<TransactionViewModel>>(await financialTransactionService.GetSince(parsedDate));
+            return CustomResponse(result);
         }
     }
 }
